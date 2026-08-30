@@ -1,0 +1,143 @@
+import pyodbc
+import logging
+import hashlib
+import json
+import requests
+import base64
+
+def connect_db():
+    try:
+        conn = pyodbc.connect(
+        )
+        logging.info("Connection to database established successfully.")
+        return conn
+    except pyodbc.Error as e:
+        logging.error(f"خطا در اتصال به بانک اطلاعاتی: {e}")
+        raise
+
+def generate_hash(ad):
+    hash_input = f"{ad['id']}{ad['title']}{ad['url']}{ad['description']}{ad['specifications']}{ad.get('phone_number', '')}"
+    hash_value = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
+    logging.info(f"Generated hash for ad {ad['id']}: {hash_value}")
+    return hash_value
+
+def send_to_api(ad, f_value, connection):
+    api_url = ''
+    headers = {
+        "authority": "apicrawler.eghlym.com",
+        "method": "POST",
+        "path": "",
+        "scheme": "https",
+        "accept": "*/*",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "accept-language": "en-US,en;q=0.9,fa;q=0.8",
+        "Content-Length": "1001",
+        "Content-Type": "application/json",
+        "origin": "",
+        "priority": "u=1, i",
+        "referer": "",
+        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "Windows",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "user-agent": "",
+    }
+
+    
+    spe = json.dumps(ad["specifications"], ensure_ascii=False)
+    spe_base64 = base64.b64encode(spe.encode('utf-8')).decode('utf-8')
+    
+    payload = {
+        "linkBindingCode": "fm5UxQVG",
+        "userCode": "lOAtjw38",
+        "siteAccountCode": "NpAh14pg",
+        "title": ad["title"],
+        "advertiseKey": ad["id"],
+        "advertiseLastPostDate": f_value,
+        "cellPhoneNumber": ad.get("phone_number", "نامشخص"),
+        "specification": spe_base64 ,
+        "statusCode": "ATqaiyax",
+    }
+
+    try:
+        response = requests.post(api_url, headers=headers, json=payload)
+        if response.status_code == 200:
+            logging.info(f"Successfully sent ad {ad['id']} to API.")
+
+            # Store the ad_key in the SentAdvertisements table
+            with pyodbc.connect('DRIVER={SQL Server};SERVER=DESKTOP-PVM5R38;DATABASE=sheypoor;Trusted_Connection=yes;') as new_connection:
+                cursor = new_connection.cursor()
+                cursor.execute("INSERT INTO SentAdvertisements (Ad_Key) VALUES (?)", (ad["id"],))
+                new_connection.commit()
+                logging.info(f"Ad {ad['id']} stored in SentAdvertisements table.")
+        else:
+            logging.error(f"Failed to send ad {ad['id']} to API. Status code: {response.status_code}, Response: {response.text}")
+    except requests.RequestException as e:
+        logging.error(f"Error while sending ad {ad['id']} to API: {e}")
+
+def save_to_db(data, f_value):
+    connection = connect_db()
+    if connection:
+        cursor = connection.cursor()
+        existing_hashes = set()  # An array to store existing hashes
+
+        # Load existing hashes from database
+        cursor.execute("SELECT hash_value FROM Advertisements")
+        for row in cursor.fetchall():
+            existing_hashes.add(row[0])
+
+        insert_data = []  
+        try:
+            # Checking the presence of f_value in the database
+            cursor.execute("SELECT f_value FROM MetaValues ORDER BY created_at DESC")
+            last_f_value = cursor.fetchone()
+            last_f_value = last_f_value[0] if last_f_value else None
+
+            if f_value != last_f_value:  # If the new f_value is different from the previous one
+                # Save the new f_value
+                cursor.execute("INSERT INTO MetaValues (f_value) VALUES (?)", (f_value,))
+                connection.commit()  # Apply changes
+
+            for ad in data:
+                hash_value = generate_hash(ad)  # Hash generation
+                
+                # Checking if the new ad hash already exists
+                if hash_value not in existing_hashes:
+                    specifications = json.dumps(ad["specifications"], ensure_ascii=False)
+
+                    # Add data to the list
+                    insert_data.append((
+                        ad["id"],  # Using Ad_Key is the same as id
+                        ad["title"], 
+                        ad["url"],
+                        ad["description"], 
+                        ad.get("phone_number", "نامشخص"), 
+                        specifications, 
+                        hash_value, 
+                        ad["status"]
+                    ))
+                    existing_hashes.add(hash_value)  # Add a new hash to the collection
+
+                    # Send to API and store Ad_Key
+                    send_to_api(ad, f_value, connection)
+
+            # If the list of data is not empty, we insert them in bulk
+            if insert_data:
+                cursor.executemany("""
+                    INSERT INTO Advertisements (Ad_Key, Title, Link, Description, Phone_Number, Specifications, hash_value, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, insert_data)
+
+                # After entering all the data, we apply the changes
+                connection.commit()
+                logging.info(f"Inserted {len(insert_data)} new records into the database.")
+            else:
+                logging.info("No new data to insert.")
+
+        except pyodbc.Error as e:
+            logging.error(f"Failed to insert data into DB: {e}")
+            connection.rollback()  # In case of error, we revert the changes
+        finally:
+            cursor.close()
