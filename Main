@@ -1,0 +1,72 @@
+from db_module import save_to_db, generate_hash
+from api_module import fetch_data_with_pagination , in_f_value
+from data_processing_module import extract_data_for_advertise
+from storage_module import save_ads_to_json
+from cities_neighborhoods import load_and_select_neighborhoods
+from select_url import load_and_select_category
+import logging
+import time
+import random
+from datetime import datetime
+import os
+
+#Logging settings
+logging.basicConfig(
+    filename=os.path.join("log",f"sheypoor_{datetime.now().strftime('%Y_%m_%d')}.log"),
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+def main(start_page=1, end_page=3):
+    logging.info("Starting paginated data extraction.")
+    
+    initial_f_value = in_f_value()
+    all_extracted_data = []  # ذخیره تمام داده‌های استخراج‌شده
+    existing_hashes = set()  # مجموعه‌ای برای ذخیره هش‌های موجود
+    current_f_value = initial_f_value  # مقدار اولیه f_value
+    
+    selected_url = load_and_select_category()
+
+    selected_key, selected_city = load_and_select_neighborhoods()  
+    
+    if selected_key is None:
+        logging.error("No valid neighborhood selected. Exiting.")
+        return
+
+    for page in range(start_page, end_page + 1):
+        data, f_value = fetch_data_with_pagination(selected_city, selected_key, selected_url, page, current_f_value)
+        
+        if data:
+            logging.info(f"Page {page}: Received data.")
+            extracted_data = extract_data_for_advertise(data)
+            
+            if f_value:
+                current_f_value = f_value
+
+            if extracted_data:
+                new_data = [ad for ad in extracted_data if generate_hash(ad) not in existing_hashes]
+                save_to_db(new_data, current_f_value)
+                existing_hashes.update(generate_hash(ad) for ad in new_data)
+
+            all_extracted_data.extend(extracted_data)
+        else:
+            logging.warning(f"Page {page}: No data received.")
+
+        time.sleep(random.uniform(1, 2))
+
+    save_ads_to_json(all_extracted_data)
+
+
+if __name__ == "__main__":
+    while True:
+        try:
+            start_page = int(input("Enter Start Page (or '0' to exit): ")) 
+            if start_page == 0:
+                print("Exiting program.")
+                break
+            end_page = int(input("Enter End Page: "))
+            main(start_page, end_page)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+        except Exception as e:
+            logging.error(f"An error occurred: {e}")
