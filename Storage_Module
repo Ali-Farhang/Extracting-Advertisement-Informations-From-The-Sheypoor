@@ -1,0 +1,55 @@
+import json
+import logging
+from db_module import connect_db
+import pyodbc
+from datetime import datetime
+import os
+
+def fetch_all_ads():
+
+    """Read all ads from database"""
+    
+    connection = connect_db()
+    if connection:
+        cursor = connection.cursor()
+        try:
+            cursor.execute("SELECT Ad_Key, Title, Link, Description, Phone_Number, Specifications ,hash_value , status  FROM Advertisements")
+            rows = cursor.fetchall()
+            ads = []
+            for row in rows:
+                ads.append({
+                    "id": row.Ad_Key,
+                    "title": row.Title,
+                    "url": row.Link,
+                    "description": row.Description,
+                    "phone_number": row.Phone_Number,
+                    "specifications": json.loads(row.Specifications),
+                    "hash_value": row.hash_value,
+                    "status": row.status
+                })
+            return ads
+        except pyodbc.Error as e:
+            logging.error(f"Failed to fetch ads from DB: {e}")
+            return []
+        finally:
+            cursor.close()
+            connection.close()
+
+
+def save_ads_to_json(filename=None):
+    ads = fetch_all_ads()
+    ads_with_numbers = {}
+
+    # Create the default file name if filename is missing or incorrect
+    if not filename or not isinstance(filename, str):
+        filename = os.path.join("json",f"sheypoor_{datetime.now().strftime('%Y_%m_%d')}.json")
+        logging.warning(f"Filename was invalid or not provided. Using default: {filename}")
+
+    for index, ad in enumerate(ads, start=1):
+        ads_with_numbers[index] = ad  # number as key and ad as value
+    try:
+        with open(filename, "w", encoding="utf-8") as json_file:
+            json.dump(ads_with_numbers, json_file, ensure_ascii=False, indent=4)
+        logging.info(f"Ads data saved to {filename}.")
+    except Exception as e:
+        logging.error(f"Error saving ads data to JSON: {e}")
