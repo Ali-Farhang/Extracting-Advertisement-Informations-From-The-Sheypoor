@@ -1,0 +1,99 @@
+import requests
+import logging
+import base64
+from captcha_module import solve_captcha  
+from datetime import datetime
+import os
+
+#Logging settings
+logging.basicConfig(
+    filename=os.path.join("log",f"sheypoor_{datetime.now().strftime('%Y_%m_%d')}.log"),
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+def fetch_phone_number(ad_key, captcha_token=None, captcha_code=None):
+    """
+    Get the contact number of the ad (with captcha support)
+    """
+    header = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Content-Type": "application/json",
+        "Cookie": "provinceID=8; province=tehran-province; track_id=605b891a16e9715cd6f6582ca8c02fd2; analytics_token=a719c8de-109c-244c-6987-a647631a5512; _yngt=ca2123fb-1251-455b-9465-6afb8b8be526; saved_items=%5B%5D; _ga=GA1.1.1270338733.1730286294; refresh_token=Bearer+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsInR5cGUiOiJSRUZSRVNIIn0.eyJhdWQiOlsic2hleXBvb3IiXSwiZXhwIjoxNzM5NTI0NDA1LCJpYXQiOjE3MzE3NDg0MDUsImlzcyI6InNoZXlwb29yIiwianRpIjoiNTBiMzE3ODAtN2JiNi00YWE3LWFkMjUtN2E1ZTExMDdlZTM2IiwibmJmIjoxNzMxNzQ4NDA1LCJ1c2VySWQiOiI1NTQ1MDUyNiJ9.DEIAOfoFZvJ7BAKkEK3I2Y637--qcpyh-YPr-jAtzmI; user_logged_in=1; cityID=301; city=tehran; geo=city; provinces=; cities=; _ga_RVTCLF1865=GS1.1.1732531174.57.1.1732531264.35.0.0",
+    }
+    
+    if captcha_token and captcha_code:
+        header["X-Captcha-Token"] = captcha_token
+        header["X-Captcha-Code"] = captcha_code
+
+    url = f"https://www.sheypoor.com/api/v10.0.0/listings/{ad_key}/number"
+    try:
+        response = requests.get(url, headers=header)
+        response.raise_for_status()
+        data = response.json()
+        if "data" in data and "attributes" in data["data"]:
+            phone_number = data["data"]["attributes"].get("phoneNumber", "نامشخص")
+            return phone_number, 0  # State 1: Complete information extracted
+        return "نامشخص", 0  # Status 0: Error in phone number extraction
+    except requests.RequestException as e:
+        if response.status_code == 429:  # Need to solve captcha
+            try:
+                error_data = response.json().get("errors", [{}])[0]
+                captcha_meta = error_data.get("meta", {})
+                token = captcha_meta.get("token")
+                captcha_image_base64 = captcha_meta.get("image")
+                if captcha_image_base64:
+                    save_captcha_image(captcha_image_base64)
+                    logging.error("Captcha detected. Please solve the captcha.")
+                    
+                    # Solving captcha using solver.py
+                    user_input = solve_captcha(captcha_image_base64)  # It is assumed that an image is taken as input
+                    phone_number, _ = fetch_phone_number(ad_key, token, user_input)
+                    return phone_number, 1  # State 1: Complete information extracted
+            except Exception as captcha_error:
+                logging.error(f"Error processing captcha: {captcha_error}")
+                return  "نامشخص", 0
+        else:
+            logging.error(f"Error fetching phone number for ad {ad_key}: {e}")
+        return "نامشخص", 0  #Status 0: Error in phone number extraction
+    
+def save_captcha_image(base64_string, filename="captcha_image.jpg"):
+    """
+    ذخیره تصویر کپچا از رشته Base64
+    """
+    try:
+        image_data = base64.b64decode(base64_string)
+        with open(filename, "wb") as file:
+            file.write(image_data)
+        logging.info(f"Captcha image saved as {filename}.")
+    except Exception as e:
+        logging.error(f"Error saving captcha image: {e}")
+
+def send_request(token, user_input, ad_key):
+    # URL و endpoint
+    url = f'https://www.sheypoor.com/api/v10.0.0/listings/{ad_key}/number'
+
+    # Headers for sending GET requests
+    head = {
+        'Host': 'www.sheypoor.com',
+        'Cookie': '_ga_RVTCLF1865=GS1.1.1733140109.10.1.1733141080.1.0.0; _ga=GA1.1.1419792796.1731850278; provinceID=8; province=tehran-province; cityID=301; city=tehran; geo=city; saved_items=%5B%5D; refresh_token=Bearer+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsInR5cGUiOiJSRUZSRVNIIn0.eyJhdWQiOlsic2hleXBvb3IiXSwiZXhwIjoxNzQwOTE2MTUyLCJpYXQiOjE3MzMxNDAxNTIsImlzcyI6InNoZXlwb29yIiwianRpIjoiYjJlMjVlNTMtZTVhYy00NDEwLWIzZGEtZDI2MWJlODViYzhlIiwibmJmIjoxNzMzMTQwMTUyLCJ1c2VySWQiOiI1NTQ1MDUyNiJ9.Wl5hG7kmVm7MII9hsHVLrXCAxFXuUvdyFhCAqeKKEi8; user_logged_in=1',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+        'Accept': 'application/vnd.api+json',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': f'https://www.sheypoor.com/v/%D9%81%D8%B1%D9%88%D8%B4-%D8%A7-%D9%85%D8%B9%D8%A7%D9%88%D8%B6%D9%87-%D8%A2-%D8%A7%D8%B1%D8%AA%D9%85%D8%A7%D9%86-%D9%87%D9%85-%D9%81-2%D8%AE%D9%88%D8%A7%D8%A8%D9%87-{ad_key}.html',
+        'X-Captcha-Token': token,
+        'X-Captcha-Code': user_input,
+        'X-User-Agent': 'Sheypoorx/3.6.484 browser/Firefox.133.0 os/Windows.10',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Priority': 'u=0',
+        'Te': 'trailers'
+    }
+
+    # Send a GET request
+    response = requests.get(url, headers=head)
+
+    # Print status code and response contents
+    return response.status_code, response.text
