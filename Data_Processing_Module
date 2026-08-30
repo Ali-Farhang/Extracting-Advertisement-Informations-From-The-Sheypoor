@@ -1,0 +1,192 @@
+import json
+import logging
+import textwrap
+from api_module import fetch_images_from_ad_id 
+from phone_number import fetch_phone_number
+
+# تعریف داده‌های دسته‌بندی‌ها در سطح بالاتر
+categories_data = {
+    "real-estate": {
+        "name": "املاک",
+        "fullAttributes": {
+            "property_type": "نوع ملک",
+            "building_age": "سال ساخت بنا",
+            "parking": "پارکینگ",
+            "elevator": "آسانسور",
+            "storage": "انباری",
+            "area": "متراژ",
+            "rooms": "تعداد اتاق",
+            "ownership_type": "نوع سند",
+            "occupancy_status": "وضعیت سکونت",
+            "floors": "تعداد طبقات",
+            "units_per_floor": "تعداد واحد در طبقه",
+            "kitchen": "آشپزخانه",
+            "heating_system": "سیستم گرمایشی و سرمایشی",
+            "cabinets": "کابینت",
+            "flooring": "کفپوش",
+            "building_facing": "نمای ساختمان",
+            "location_orientation": "موقعیت جغرافیایی بنا",
+            "unit_orientation": "موقعیت جغرافیایی واحد",
+            "convenience": "امکانات رفاهی و تفریحی",
+            "secret": "امکانات امنیتی"
+        }
+    },
+    "job": {
+        "name": "استخدام",
+        "fullAttributes": {
+            "ad_type": "نوع آگهی",
+            "contract": "نوع قرارداد",
+            "payment": "شیوه پرداخت",
+            "salary": "میزان حقوق",
+            "history": "سابقه",
+            "start_working": "ساعات کاری از",
+            "end_working": "ساعات کاری تا",
+            "sex": "جنسیت"
+        }
+    },
+    "vehicles": {
+        "name": "وسیله نقلیه",
+        "fullAttributes": {
+            "car_model": "مدل خودرو",
+            "payment": "نقدی/اقساطی",
+            "production": "سال تولید",
+            "km": "کیلومتر",
+            "color": "رنگ",
+            "gearbox": "گیربکس",
+            "fuel": "نوع سوخت",
+            "body_condition": "وضعیت بدنه",
+            "chassis": "نوع شاسی"
+        }
+    },
+    "services": {
+        "name": "خدمات و کسب و کار",
+        "fullAttributes": {}
+    },
+    "home": {
+        "name": "لوازم خانگی",
+        "fullAttributes": {
+            "condition": "وضعیت کالا"
+        }
+    },
+    "sports-games-hobbies": {
+        "name": "ورزش فرهنگ فراغت",
+        "fullAttributes": {
+            "condition": "وضعیت کالا"
+        }
+    },
+    "electronics": {
+        "name": "لوازم الکترونیکی",
+        "fullAttributes": {
+            "condition": "وضعیت کالا"
+        }
+    },
+    "industrial-commercial": {
+        "name": "صنعتی، اداری و تجاری",
+        "fullAttributes": {
+            "condition": "وضعیت کالا"
+        }
+    },
+    "mobile-tablet-accessories": {
+        "name": "موبایل، تبلت و لوازم",
+        "fullAttributes": {
+            "condition": "وضعیت کالا",
+            "type": "نوع"
+        }
+    },
+    "personal-stuff": {
+        "name": "لوازم شخصی",
+        "fullAttributes": {
+            "condition": "وضعیت کالا",
+            "sex": "زنانه / مردانه"
+        }
+    }
+}
+
+# Extract data from JSON
+def extract_data_for_advertise(data):
+    """استخراج داده‌های مفید از JSON"""
+    extracted_data = []
+    items = data.get("data", [])
+    if not items:
+        logging.warning("No 'data' key found or it is empty.")
+        return extracted_data
+
+    for item in items:
+        ad_items = item.get("items", [item])
+        for ad in ad_items:
+            ad_type = ad.get("type")
+            if ad_type in ["banner", "shop", "serpSuggestionUrl"]:  # Ignore non-ad types
+                logging.warning(f"Skipping non-advertisement item: {ad}")
+                continue
+
+            ad_id = ad.get("id")
+            attributes = ad.get("attributes", {})
+            title = attributes.get("title")
+
+            # Checking the existence of price data
+            price_data = attributes.get("price", [{}])
+            if price_data and isinstance(price_data, list) and len(price_data) > 0:
+                price_amount = price_data[0].get("amount", "نامشخص")
+            else:
+                price_amount = "نامشخص"
+
+            url_ad = attributes.get("url")
+            location = attributes.get("location", "نامشخص")
+            description_raw = ad.get("description", "توضیحات موجود نیست.")
+            categories = attributes.get("categories", [{}])
+            category_name = categories[0].get("name", "نامشخص")
+
+            phone_number, number_status = fetch_phone_number(ad_id)
+            image_links, price_per_meter, image_status = fetch_images_from_ad_id(ad_id)
+            full_attributes = ad.get("fullAttributes", [])
+
+            specifications = {
+                "description": "\n".join(textwrap.wrap(description_raw, width=80)),
+                "price_amount": price_amount,
+                "price_per_meter": price_per_meter,
+                "location": location,
+                "image_links": image_links  
+            }
+
+            # Full feature extraction based on categories
+            full_attributes_dict = {}
+            for category_key, category_value in categories_data.items():
+                if category_value["name"] == category_name:
+                    for attr_key, attr_name in category_value["fullAttributes"].items():
+                        value = get_attribute_value(full_attributes, attr_name)
+                        if value != "نامشخص":  # Just add specific features
+                            full_attributes_dict[attr_key] = value
+                    break
+            
+            specifications.update(full_attributes_dict)  # Combining full_attributes with specifications
+
+            description = "\n".join(textwrap.wrap(description_raw, width=80))
+
+            # Determine the overall status of the ad
+            status = 1  # Default status: Extracted ad
+            if image_status == 1:  # If images are extracted
+                status = 3
+            if number_status == 1:  # If the contact number is extracted
+                status = 3  # The ad is complete
+
+            if ad_id and title and url_ad:
+                extracted_data.append({
+                    "id": ad_id,
+                    "title": title,
+                    "url": url_ad,
+                    "phone_number": phone_number,
+                    "description": description,
+                    "specifications": {k: v for k, v in specifications.items() if v != "نامشخص"},  # Only specific features
+                    "status": status,  # Save status
+                })
+            else:
+                logging.warning(f"Missing fields in ad item: {ad}")
+
+    return extracted_data
+
+
+def get_attribute_value(attributes, key_name):
+    for attribute in attributes:
+        if attribute.get("key") == key_name:
+            return attribute.get("value", "نامشخص")
+    return "نامشخص"
