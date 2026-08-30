@@ -2,10 +2,10 @@ import requests
 import logging
 from config import initial_f_value , url_template
 
-# url_template = "https://www.sheypoor.com/api/v10.0.0/search/{selected_city}/{selected_key}/houses-apartments-for-sale?f={f_value}&p={page}"
+# url_template = ""
 headers = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0",
-    "Content-Type": "application/json"
+    "User-Agent": "",
+    "Content-Type": ""
 }
 
 def fetch_data_with_pagination(selected_city, selected_key, selected_url, page, f_value):
@@ -29,11 +29,11 @@ def fetch_data_with_pagination(selected_city, selected_key, selected_url, page, 
 
 def fetch_images_from_ad_id(ad_id):
     header = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Content-Type": "application/json",
+        "User-Agent": "",
+        "Content-Type": "",
     }
 
-    url = f"https://www.sheypoor.com/api/v10.0.0/listings/{ad_id}"
+    url = f""
     try:
         response = requests.get(url, headers=header)
         response.raise_for_status()  # HTTP status check
